@@ -8,6 +8,8 @@
 // Pinouts thanks to http://www.68k.org/~degs/nextkeyboard.html
 // Keycodes from http://ftp.netbsd.org/pub/NetBSD/NetBSD-release-6/src/sys/arch/next68k/dev/
 
+#include <Arduino.h>
+#include <Keyboard.h>
 #include "wsksymdef.h"
 #include "nextkeyboard.h"
 
