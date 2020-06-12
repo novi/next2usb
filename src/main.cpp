@@ -17,7 +17,9 @@
 #define TIMING 50
 
 // pick which pins you want to use
+// To KB
 #define KEYBOARDOUT 3
+// From KB
 #define KEYBOARDIN 2
 
 // comment to speed things up, uncomment for help!
@@ -30,7 +32,7 @@ uint8_t misopin;
 #define readkbd() ((*misoportreg) & misopin)
 
 // debugging/activity LED
-#define LED 13
+#define LED 4
 
 #define NEXT_KMBUS_IDLE 0x200600
 
@@ -119,8 +121,8 @@ void setup() {
   Keyboard.begin();
 
 #ifdef DEBUG
-  while (!Serial)
-  Serial.begin(57600);
+  //while (!Serial)
+  Serial.begin(9600);
   Serial.println("NeXT");
 #endif
 }
