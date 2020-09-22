@@ -14,7 +14,7 @@
 #include "nextkeyboard.h"
 
 // the timing per bit, 50microseconds
-#define TIMING 50
+#define TIMING 52
 
 // pick which pins you want to use
 // To KB
@@ -22,8 +22,11 @@
 // From KB
 #define KEYBOARDIN 2
 
+// power key
+#define KB_POWERKEY_IN 5
+
 // comment to speed things up, uncomment for help!
-//#define DEBUG 
+// #define DEBUG 1
 
 // speed up reads by caching the 'raw' pin ports
 volatile uint8_t *misoportreg;
@@ -45,6 +48,7 @@ uint8_t misopin;
 #define NEXT_KB_COMMAND_RIGHT 0x10000
 #define NEXT_KB_SHIFT_LEFT 0x2000
 #define NEXT_KB_SHIFT_RIGHT 0x4000
+#define NEXT_KB_BREAK 0x100
 
 // special command for setting LEDs
 void setLEDs(bool leftLED, bool rightLED) {
@@ -103,9 +107,16 @@ void setup() {
   pinMode(KEYBOARDOUT, OUTPUT);
   pinMode(KEYBOARDIN, INPUT);
   pinMode(LED, OUTPUT);
+  pinMode(KB_POWERKEY_IN, INPUT_PULLUP);
   
   misoportreg = portInputRegister(digitalPinToPort(KEYBOARDIN));
   misopin = digitalPinToBitMask(KEYBOARDIN);
+
+  delay(500); // delay for power warm up
+  
+  Keyboard.begin();
+
+  delay(500); // delay for keyboard warm up
   
   // according to http://cfile7.uf.tistory.com/image/14448E464F410BF22380BB
   query();
@@ -117,8 +128,6 @@ void setup() {
   delay(5);
   nextreset();
   delay(8);
-  
-  Keyboard.begin();
 
 #ifdef DEBUG
   //while (!Serial)
@@ -140,8 +149,10 @@ uint32_t getresponse() {
   }
   sei();
   return data;
-
 }
+
+static bool isPowerPressed = false;
+static uint32_t pressedModifiers = 0; 
 
 void loop() {
   digitalWrite(LED, LOW);
@@ -152,6 +163,18 @@ void loop() {
 
   // check for a 'idle' response, we'll do nothing
   if (resp == NEXT_KMBUS_IDLE) return;
+
+  // read power button
+  if (!digitalRead(KB_POWERKEY_IN) && !isPowerPressed) {
+    delay(30); // avoid debouncing
+    if (!digitalRead(KB_POWERKEY_IN)) {
+      isPowerPressed = true;
+      Keyboard.press(KEY_INSERT); // map power key
+    }
+  } else if (isPowerPressed && digitalRead(KB_POWERKEY_IN)) {
+    isPowerPressed = false;
+    Keyboard.release(KEY_INSERT); // map power key
+  }
   
   // turn on the LED when we get real resposes!
   digitalWrite(LED, HIGH);
@@ -161,53 +184,80 @@ void loop() {
   keycode /= 2;
   
 #ifdef DEBUG
-  Serial.print('['); Serial.print(resp, HEX);  Serial.print("] ");
-  Serial.print("keycode: "); Serial.print(keycode);
+  uint32_t respDebug = resp & 0xffcff9ff;
+  if (respDebug) {
+    Serial.print('['); Serial.print(respDebug, HEX);  Serial.print("] ");
+    Serial.println();
+  }
+  // Serial.print("keycode: "); Serial.println(keycode);
 #endif
 
   // modifiers! you can remap these here, 
   // but I suggest doing it in the OS instead
-  if (resp & NEXT_KB_CONTROL)
+  if (resp & NEXT_KB_CONTROL) {
     Keyboard.press(KEY_LEFT_CTRL);
-  else 
+    pressedModifiers |= NEXT_KB_CONTROL;
+  } else if ( (pressedModifiers & NEXT_KB_CONTROL) && (resp & NEXT_KB_BREAK) ) {
     Keyboard.release(KEY_LEFT_CTRL);
+    pressedModifiers &= ~(NEXT_KB_CONTROL);
+  }
 
   if (resp & NEXT_KB_SHIFT_LEFT) {
     Keyboard.press(KEY_LEFT_SHIFT);
-  } else { 
+    pressedModifiers |= NEXT_KB_SHIFT_LEFT;
+  } else if ( (pressedModifiers & NEXT_KB_SHIFT_LEFT) && (resp & NEXT_KB_BREAK) ) {
     Keyboard.release(KEY_LEFT_SHIFT);
+    pressedModifiers &= ~(NEXT_KB_SHIFT_LEFT);
   }
+
   if (resp & NEXT_KB_SHIFT_RIGHT) {
     Keyboard.press(KEY_RIGHT_SHIFT);
-  } else {
+    pressedModifiers |= NEXT_KB_SHIFT_RIGHT;
+  } else if ( (pressedModifiers & NEXT_KB_SHIFT_RIGHT) && (resp & NEXT_KB_BREAK) ) {
     Keyboard.release(KEY_RIGHT_SHIFT);
+    pressedModifiers &= ~(NEXT_KB_SHIFT_RIGHT);
   }
+
   boolean shiftPressed = (resp & (NEXT_KB_SHIFT_LEFT|NEXT_KB_SHIFT_RIGHT)) != 0;
   
   // turn on shift LEDs if shift is held down
-  if (shiftPressed)
-    setLEDs(true, true);
+  /*if (shiftPressed)
+    setLEDs(true, true); // TODO: only send one time, not always
   else
-    setLEDs(false, false);
+    setLEDs(false, false); // TODO: only send one time, not always
+    */
     
-  if (resp & NEXT_KB_COMMAND_LEFT)
+  if (resp & NEXT_KB_COMMAND_LEFT) {
     Keyboard.press(KEY_LEFT_GUI);
-  else 
+    pressedModifiers |= NEXT_KB_COMMAND_LEFT;
+  } else if ( (pressedModifiers & NEXT_KB_COMMAND_LEFT) && (resp & NEXT_KB_BREAK) ) {
     Keyboard.release(KEY_LEFT_GUI);
-    
-  if (resp & NEXT_KB_COMMAND_RIGHT)
-    Keyboard.press(KEY_RIGHT_GUI);
-  else 
-    Keyboard.release(KEY_RIGHT_GUI);
+    pressedModifiers &= ~(NEXT_KB_COMMAND_LEFT);
+  }
 
-  if (resp & NEXT_KB_ALTERNATE_LEFT)
+  if (resp & NEXT_KB_COMMAND_RIGHT) {
+    Keyboard.press(KEY_RIGHT_GUI);
+    pressedModifiers |= NEXT_KB_COMMAND_RIGHT;
+  } else if ( (pressedModifiers & NEXT_KB_COMMAND_RIGHT) && (resp & NEXT_KB_BREAK) ) {
+    Keyboard.release(KEY_RIGHT_GUI);
+    pressedModifiers &= ~(NEXT_KB_COMMAND_RIGHT);
+  }
+
+  if (resp & NEXT_KB_ALTERNATE_LEFT) {
     Keyboard.press(KEY_LEFT_ALT);
-  else 
+    pressedModifiers |= NEXT_KB_ALTERNATE_LEFT;
+  } else if ( (pressedModifiers & NEXT_KB_ALTERNATE_LEFT) && (resp & NEXT_KB_BREAK) ) {
     Keyboard.release(KEY_LEFT_ALT);
-  if (resp & NEXT_KB_ALTERNATE_RIGHT)
+    pressedModifiers &= ~(NEXT_KB_ALTERNATE_LEFT);
+  }
+
+  if (resp & NEXT_KB_ALTERNATE_RIGHT) {
     Keyboard.press(KEY_RIGHT_ALT);
-  else 
+    pressedModifiers |= NEXT_KB_ALTERNATE_RIGHT;
+  } else if ( (pressedModifiers & NEXT_KB_ALTERNATE_RIGHT) && (resp & NEXT_KB_BREAK) ) {
     Keyboard.release(KEY_RIGHT_ALT);
+    pressedModifiers &= ~(NEXT_KB_ALTERNATE_RIGHT);
+  }
 
   if (keycode == 0) return;
   
@@ -245,8 +295,8 @@ void loop() {
           break;
         
         // remap the other special keys because the KeyboardMouse can't send proper vol/brightness anyway
-        case KS_AudioLower:  code = KEY_INSERT; break;
-        case KS_AudioRaise:  code = KEY_DELETE; break;
+        case KS_AudioLower:  code = KEY_HOME; break;
+        case KS_AudioRaise:  code = KEY_END; break;
         case KS_Cmd_BrightnessUp:    code = KEY_PAGE_UP; break;
         case KS_Cmd_BrightnessDown:  code = KEY_PAGE_DOWN; break;
         
@@ -277,4 +327,5 @@ void loop() {
       }
     }
   }
+
 }
