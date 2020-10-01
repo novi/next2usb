@@ -295,10 +295,10 @@ void loop() {
           break;
         
         // remap the other special keys because the KeyboardMouse can't send proper vol/brightness anyway
-        case KS_AudioLower:  code = KEY_HOME; break;
-        case KS_AudioRaise:  code = KEY_END; break;
-        case KS_Cmd_BrightnessUp:    code = KEY_PAGE_UP; break;
-        case KS_Cmd_BrightnessDown:  code = KEY_PAGE_DOWN; break;
+        case KS_AudioLower:  code = KEY_F11; break;
+        case KS_AudioRaise:  code = KEY_F12; break;
+        case KS_Cmd_BrightnessUp:    code = KEY_F2; break;
+        case KS_Cmd_BrightnessDown:  code = KEY_F1; break;
         
         case 0:
         default: code = ascii;
