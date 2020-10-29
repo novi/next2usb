@@ -295,8 +295,13 @@ void loop() {
           break;
         
         // remap the other special keys because the KeyboardMouse can't send proper vol/brightness anyway
-        case KS_AudioLower:  code = KEY_F11; break;
-        case KS_AudioRaise:  code = KEY_F12; break;
+        case KS_AudioLower:  code = KEY_F12; break;
+        case KS_AudioRaise:  
+          if ( (pressedModifiers & NEXT_KB_COMMAND_LEFT) || (pressedModifiers & NEXT_KB_COMMAND_RIGHT) ) {
+            code = KEY_F10; break; // handle as mute
+          } else {
+            code = KEY_F11; break; // Note: is it actual lower?
+          }
         case KS_Cmd_BrightnessUp:    code = KEY_F2; break;
         case KS_Cmd_BrightnessDown:  code = KEY_F1; break;
         
