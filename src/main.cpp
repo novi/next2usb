@@ -14,7 +14,8 @@
 #include "nextkeyboard.h"
 
 // the timing per bit, 50microseconds
-#define TIMING 52
+#define TIMING_SEND 50
+#define TIMING_RECV 51
 
 // pick which pins you want to use
 // To KB
@@ -39,6 +40,8 @@ uint8_t misopin;
 
 #define NEXT_KMBUS_IDLE 0x200600
 
+#define NEXT_RESPONSE_TIMEOUT 0xffffffff
+
 // NeXT Keyboard Defines
 // modifiers
 #define NEXT_KB_CONTROL 0x1000
@@ -53,54 +56,74 @@ uint8_t misopin;
 // special command for setting LEDs
 void setLEDs(bool leftLED, bool rightLED) {
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING *9);
+  delayMicroseconds(TIMING_SEND *9);
   digitalWrite(KEYBOARDOUT, HIGH);  
-  delayMicroseconds(TIMING *3);
+  delayMicroseconds(TIMING_SEND *3);
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING);
+  delayMicroseconds(TIMING_SEND);
 
   if (leftLED)
       digitalWrite(KEYBOARDOUT, HIGH);
   else 
       digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING);
+  delayMicroseconds(TIMING_SEND);
 
   if (rightLED)
       digitalWrite(KEYBOARDOUT, HIGH);
   else 
       digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING);
+  delayMicroseconds(TIMING_SEND);
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING *7);
+  delayMicroseconds(TIMING_SEND *7);
   digitalWrite(KEYBOARDOUT, HIGH);
 }
 
 void query() {
   // query the keyboard for data
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING *5);
+  delayMicroseconds(TIMING_SEND *5);
   digitalWrite(KEYBOARDOUT, HIGH);  
-  delayMicroseconds(TIMING );  
+  delayMicroseconds(TIMING_SEND );  
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING *3);
+  delayMicroseconds(TIMING_SEND *3);
   digitalWrite(KEYBOARDOUT, HIGH); 
 }
 
 void nextreset() {
   // reset the keyboard
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING);
+  delayMicroseconds(TIMING_SEND);
   digitalWrite(KEYBOARDOUT, HIGH);  
-  delayMicroseconds(TIMING*4);  
+  delayMicroseconds(TIMING_SEND*4);  
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING);
+  delayMicroseconds(TIMING_SEND);
   digitalWrite(KEYBOARDOUT, HIGH);
-  delayMicroseconds(TIMING*6);
+  delayMicroseconds(TIMING_SEND*6);
   digitalWrite(KEYBOARDOUT, LOW);
-  delayMicroseconds(TIMING*10);  
+  delayMicroseconds(TIMING_SEND*10);  
   digitalWrite(KEYBOARDOUT, HIGH);
 }
 
+void initNeXTKeyboard()
+{
+  Keyboard.releaseAll();
+
+  // according to http://cfile7.uf.tistory.com/image/14448E464F410BF22380BB
+  for (size_t i = 0; i < 5; i++) {
+    query();
+    // delayMicroseconds(TIMING_SEND*5);
+    delay(5);
+    nextreset();
+    delay(8);
+    // delayMicroseconds(TIMING_SEND*8);
+  }
+  
+  // setLEDs(true, false);
+
+  digitalWrite(LED, HIGH);
+  delay(200);
+  digitalWrite(LED, LOW);
+}
 
 void setup() {
   // set up pin directions
@@ -118,51 +141,90 @@ void setup() {
 
   delay(500); // delay for keyboard warm up
   
-  // according to http://cfile7.uf.tistory.com/image/14448E464F410BF22380BB
-  query();
-  delay(5);
-  nextreset();
-  delay(8);
-  
-  query();
-  delay(5);
-  nextreset();
-  delay(8);
+  initNeXTKeyboard();
 
 #ifdef DEBUG
   //while (!Serial)
   Serial.begin(9600);
-  Serial.println("NeXT");
+  Serial.println("NeXT keyboard started.");
 #endif
 }
 
 uint32_t getresponse() {
   // bitbang timing, read 22 bits 50 microseconds apart
-  cli();
-  while ( readkbd() );
-  delayMicroseconds(TIMING/2);
+  unsigned long before = millis();
+  while ( readkbd() ) {
+    if (millis() - before > 5000) {
+      return NEXT_RESPONSE_TIMEOUT;
+    }
+  }
+  noInterrupts();
+  delayMicroseconds(TIMING_RECV/2);
   uint32_t data = 0;
   for (uint8_t i=0; i < 22; i++) {
       if (readkbd())
         data |= ((uint32_t)1 << i);
-      delayMicroseconds(TIMING);
+      delayMicroseconds(TIMING_RECV);
   }
-  sei();
+  interrupts();
   return data;
 }
 
 static bool isPowerPressed = false;
 static uint32_t pressedModifiers = 0; 
+static uint32_t idleCountDebug = 0;
 
 void loop() {
+  
+  // for (;;) {
+  //   Serial.println("test");
+  //   digitalWrite(LED, LOW);
+  //   delay(1000);
+  //   digitalWrite(LED, HIGH);
+  //   delay(1000);
+  // }
+
+
   digitalWrite(LED, LOW);
   delay(20);
   uint32_t resp;
   query();
+
+#ifdef DEBUG
+    // Serial.print("b");
+#endif
   resp = getresponse();
 
+#ifdef DEBUG
+    // Serial.print("a");
+#endif
+
+  if (resp == NEXT_RESPONSE_TIMEOUT) {
+    #ifdef DEBUG
+      Serial.println("response timeout. resetting keyboard.");
+    #endif
+    initNeXTKeyboard();
+    return;
+  }
+
+  bool isIdle = false;
   // check for a 'idle' response, we'll do nothing
-  if (resp == NEXT_KMBUS_IDLE) return;
+  if (resp == NEXT_KMBUS_IDLE) {
+    #ifdef DEBUG
+    // Serial.print("no resp ");
+    // Serial.println(idleCountDebug);
+    #endif
+    idleCountDebug++;
+    if (idleCountDebug > 500) {
+      idleCountDebug = 0;
+      #ifdef DEBUG
+      Serial.println("force init keyboard");
+      #endif
+      // initNeXTKeyboard();
+    }
+    isIdle = true;
+  } 
+  idleCountDebug = 0;
 
   // read power button
   if (!digitalRead(KB_POWERKEY_IN) && !isPowerPressed) {
@@ -170,11 +232,16 @@ void loop() {
     if (!digitalRead(KB_POWERKEY_IN)) {
       isPowerPressed = true;
       Keyboard.press(KEY_INSERT); // map power key
+      #ifdef DEBUG
+          Serial.println("power pressed");
+      #endif
     }
   } else if (isPowerPressed && digitalRead(KB_POWERKEY_IN)) {
     isPowerPressed = false;
     Keyboard.release(KEY_INSERT); // map power key
   }
+
+  if (isIdle) return;
   
   // turn on the LED when we get real resposes!
   digitalWrite(LED, HIGH);
